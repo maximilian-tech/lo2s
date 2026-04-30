@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <lo2s/log.hpp>
+
 #include <nitro/options/arguments.hpp>
 #include <nitro/options/parser.hpp>
 #include <nlohmann/json_fwd.hpp>
