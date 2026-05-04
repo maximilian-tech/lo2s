@@ -14,13 +14,25 @@ find_path(Debuginfod_INCLUDE_DIRS
     PATHS ENV C_INCLUDE_PATH ENV CPATH
     PATH_SUFFIXES include)
 
+
+set(_Debuginfod_ORIG_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
+
 if(Debuginfod_USE_STATIC_LIBS)
-    find_library(Debuginfod_LIBRARY NAMES libdebuginfod.a
-            HINTS ENV LIBRARY_PATH)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
 else()
-    find_library(Debuginfod_LIBRARY NAMES libdebuginfod.so
-            HINTS ENV LIBRARY_PATH LD_LIBRARY_PATH)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES .so .so.1)
 endif()
+
+find_library(Debuginfod_LIBRARY
+    NAMES debuginfod
+    HINTS
+        ENV LIBRARY_PATH
+        ENV LD_LIBRARY_PATH
+    PATHS
+        /usr/lib64
+)
+
+set(CMAKE_FIND_LIBRARY_SUFFIXES ${_Debuginfod_ORIG_SUFFIXES})
 
 include (FindPackageHandleStandardArgs)
 FIND_PACKAGE_HANDLE_STANDARD_ARGS(Debuginfod DEFAULT_MSG
