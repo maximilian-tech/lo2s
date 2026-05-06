@@ -242,8 +242,10 @@ Trace::Trace()
 
 void Trace::begin_record()
 {
+    starting_time_ = time::now();
+    starting_system_time_ = std::chrono::system_clock::now();
     Log::info() << "Initialization done. Start recording...";
-    add_lo2s_property("STARTING_TIME", fmt::format("{:%FT%T%z}", std::chrono::system_clock::now()));
+    add_lo2s_property("STARTING_TIME", fmt::format("{:%FT%T%z}", starting_system_time_));
 }
 
 void Trace::end_record()
