@@ -14,6 +14,8 @@
 
 #include <nitro/log/severity.hpp>
 
+#include <algorithm>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -26,7 +28,11 @@
 #ifdef HAVE_DEBUGINFOD
 extern "C"
 {
+#if __has_include(<elfutils/debuginfod.h>)
 #include <elfutils/debuginfod.h>
+#else
+#include <debuginfod.h>
+#endif
 }
 #endif
 
@@ -38,6 +44,14 @@ struct getfuncs_arg
 {
     Dwarf_Addr addr;
     std::string name;
+    Dwarf_Die die;
+};
+
+struct function_source_info
+{
+    std::string file;
+    unsigned int begin_line;
+    unsigned int end_line;
 };
 
 /*
@@ -59,10 +73,82 @@ int find_containing_func_for_addr(Dwarf_Die* d, void* arg)
         {
             args->name = name;
         }
+        args->die = *d;
         return DWARF_CB_ABORT;
     }
 
     return DWARF_CB_OK;
+}
+
+function_source_info source_info_for_function(Dwarf_Die* cudie, Dwarf_Die* function_die,
+                                              const char* fallback_source_file)
+{
+    int decl_line = 0;
+    if (dwarf_decl_line(function_die, &decl_line) != 0)
+    {
+        decl_line = 0;
+    }
+
+    const char* decl_file = dwarf_decl_file(function_die);
+    const char* source_file = (decl_file != nullptr) ? decl_file : fallback_source_file;
+    std::string source_file_string = (source_file != nullptr) ? source_file : "";
+
+    Dwarf_Addr low_pc = 0;
+    Dwarf_Addr high_pc = 0;
+    if (dwarf_lowpc(function_die, &low_pc) != 0 || dwarf_highpc(function_die, &high_pc) != 0)
+    {
+        return { source_file_string, static_cast<unsigned int>(decl_line), 0 };
+    }
+
+    Dwarf_Lines* lines = nullptr;
+    size_t nlines = 0;
+    if (dwarf_getsrclines(cudie, &lines, &nlines) != 0)
+    {
+        return { source_file_string, static_cast<unsigned int>(decl_line), 0 };
+    }
+
+    int first_line = std::numeric_limits<int>::max();
+    int last_line = 0;
+    for (size_t i = 0; i < nlines; ++i)
+    {
+        Dwarf_Line* line = dwarf_onesrcline(lines, i);
+
+        Dwarf_Addr line_addr = 0;
+        if (line == nullptr || dwarf_lineaddr(line, &line_addr) != 0 || line_addr < low_pc ||
+            line_addr >= high_pc)
+        {
+            continue;
+        }
+
+        const char* line_source_file = dwarf_linesrc(line, nullptr, nullptr);
+        if (source_file != nullptr && line_source_file != nullptr &&
+            std::string(source_file) != line_source_file)
+        {
+            continue;
+        }
+
+        int lineno = 0;
+        if (dwarf_lineno(line, &lineno) != 0 || lineno <= 0)
+        {
+            continue;
+        }
+
+        first_line = std::min(first_line, lineno);
+        last_line = std::max(last_line, lineno);
+    }
+
+    if (decl_line > 0)
+    {
+        first_line = std::min(first_line, decl_line);
+    }
+
+    if (first_line == std::numeric_limits<int>::max())
+    {
+        first_line = decl_line;
+    }
+
+    return { source_file_string, static_cast<unsigned int>(first_line),
+             static_cast<unsigned int>(last_line) };
 }
 
 std::unique_ptr<Indicator> bar;
@@ -226,9 +312,15 @@ LineInfo DwarfFunctionResolver::lookup_line_info(Address addr)
 
                 if (!arg.name.empty())
                 {
+                    const auto function_source =
+                        source_info_for_function(cudie, &arg.die, srcname);
+
                     return cache_
                         .emplace(addr, LineInfo::for_function(srcname, arg.name.c_str(), lineno,
-                                                              module_name))
+                                                              module_name,
+                                                              function_source.begin_line,
+                                                              function_source.end_line,
+                                                              function_source.file.c_str()))
                         .first->second;
                 }
             }
